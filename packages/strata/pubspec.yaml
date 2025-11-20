@@ -1,0 +1,19 @@
+name: strata
+description: An Ecto-inspired data mapping and changeset validation library for Dart.
+version: 0.1.0
+repository: https://github.com/tugorez/strata
+issue_tracker: https://github.com/tugorez/strata/issues
+
+environment:
+  sdk: ^3.9.2
+
+resolution: workspace
+
+dependencies:
+
+dev_dependencies:
+  build_runner: ^2.4.13
+  lints: ^6.0.0
+  strata_builder: ^0.1.0
+  strata_in_memory: ^0.1.0
+  test: ^1.25.6

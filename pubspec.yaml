@@ -1,0 +1,49 @@
+name: strata_monorepo
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+
+workspace:
+  - packages/strata
+  - packages/strata_sqlite
+  - packages/strata_sqlite/example
+  - packages/strata_builder
+  - packages/strata_in_memory
+
+dev_dependencies:
+  melos: ^7.1.1
+
+melos:
+  scripts:
+    start:
+      run: melos exec -- dart run
+      description: "Starts the app"
+    get:
+      run: melos exec -- dart pub get
+      description: Get all Flutter dependencies.
+    analyze:
+      run: melos exec -- dart analyze
+      description: Run `dart analyze` in all packages.
+    test:
+      run: melos exec --dir-exists=test -- dart test
+      description: Run all tests in the monorepo.
+    clean:
+      run: melos exec -- dart clean
+      description: Run `dart clean` in all packages.
+    format:
+      run: |
+        melos exec --dir-exists=lib -- "dart format --output=none --set-exit-if-changed lib"
+        melos exec --dir-exists=test -- "dart format --output=none --set-exit-if-changed test"
+        melos exec --dir-exists=screens -- "dart format --output=none --set-exit-if-changed screens"
+      description: Check formatting in all packages.
+    codegen:
+      run: melos exec --depends-on="build_runner" -- dart run build_runner build --delete-conflicting-outputs
+      description: Run code generation in packages that need it.
+    check:
+      run: |
+        melos get &&
+        melos run codegen &&
+        melos run analyze &&
+        melos run test
+      description: Fetch dependencies, run codegen, analyze, and test everything.

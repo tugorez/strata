@@ -1,0 +1,23 @@
+# Dart/Flutter specific ignores
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.idea/
+.vs/
+.vscode/
+
+# Build artifacts
+build/
+*.iml
+*.lock
+*.g.dart
+*.freezed.dart
+
+# Melos specific ignores
+.melos/
+pubspec_overrides.yaml # If using pubspec overrides
+
+# Other common ignores
+.DS_Store
+Thumbs.db

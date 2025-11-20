@@ -1,0 +1,5 @@
+targets:
+  $default:
+    builders:
+      strata_builder|schemaBuilder:
+        enabled: true

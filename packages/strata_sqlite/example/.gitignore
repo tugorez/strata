@@ -1,0 +1,20 @@
+# Generated schema files (build_runner output)
+*.g.dart
+
+# Note: migrations.dart is intentionally NOT ignored - it should be committed
+# It's generated from SQL files using: dart run strata_builder:generate_migrations
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Build artifacts
+.dart_tool/
+build/
+.packages
+
+# IDE
+.idea/
+.vscode/
+*.iml

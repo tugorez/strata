@@ -1,0 +1,7 @@
+targets:
+  $default:
+    builders:
+      strata_builder|schema_builder:
+        enabled: true
+        generate_for:
+          - test/models/*.dart
