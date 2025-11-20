@@ -1,0 +1,19 @@
+name: strata_sqlite_example
+description: A comprehensive example demonstrating all features of Strata with SQLite
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+
+resolution: workspace
+
+dependencies:
+  strata: ^0.1.0
+  strata_sqlite: ^0.1.0
+  sqlite3: ^2.9.0
+
+dev_dependencies:
+  build_runner: ^2.4.13
+  strata_builder: ^0.1.0
+  lints: ^6.0.0

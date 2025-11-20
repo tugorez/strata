@@ -1,0 +1,11 @@
+targets:
+  $default:
+    sources:
+      include:
+        - lib/**
+        - migrations/**
+    builders:
+      strata_builder|schemaBuilder:
+        enabled: true
+      strata_builder|migrationsBuilder:
+        enabled: true
