@@ -271,6 +271,67 @@ Use this example as a template for your own applications:
 3. Generate code
 4. Build your business logic with the repository
 
+## Advanced: High-Precision Timestamps
+
+For applications requiring nanosecond precision (e.g., audit logs, event sourcing), use the `@Timestamp` annotation:
+
+### Schema Definition
+
+```dart
+@StrataSchema(table: 'audit_logs')
+class AuditLog with Schema {
+  final int id;
+  final String action;
+  final String details;
+  
+  @Timestamp()
+  final DateTime createdAt;
+
+  AuditLog({
+    required this.id,
+    required this.action,
+    required this.details,
+    required this.createdAt,
+  });
+}
+```
+
+### Migration
+
+```sql
+-- @Up()
+CREATE TABLE audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  action TEXT NOT NULL,
+  details TEXT,
+  created_at_seconds INTEGER NOT NULL,
+  created_at_nanos INTEGER NOT NULL
+);
+
+-- @Down()
+DROP TABLE IF EXISTS audit_logs;
+```
+
+### Usage
+
+```dart
+// Query recent logs with DateTime-specific methods
+final recentLogs = await repo.getAll(
+  AuditLogQuery()
+      .whereCreatedAtAfter(DateTime.now().subtract(Duration(hours: 1)))
+      .orderByCreatedAt(ascending: false)
+);
+
+// Insert with DateTime (you provide the seconds/nanos columns)
+final timestamp = DateTime.now().toUtc();
+final changeset = AuditLogChangeset({
+  'action': 'user_login',
+  'details': 'User logged in from mobile app',
+  'created_at_seconds': timestamp.millisecondsSinceEpoch ~/ 1000,
+  'created_at_nanos': (timestamp.microsecond * 1000),
+})..cast(['action', 'details', 'created_at_seconds', 'created_at_nanos']);
+```
+
 ## Troubleshooting
 
 ### Code generation errors

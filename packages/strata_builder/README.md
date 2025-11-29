@@ -152,6 +152,63 @@ class UserQuery extends Query<User> {
 }
 ```
 
+#### Timestamp Support
+
+Use `@Timestamp` on `DateTime` fields for high-precision storage. The generator maps a single `DateTime` field to two database columns (`_seconds` and `_nanos`):
+
+```dart
+// Given this schema:
+@StrataSchema(table: 'posts')
+class Post with Schema {
+  final int id;
+  final String title;
+  
+  @Timestamp()
+  final DateTime createdAt;
+  
+  @Timestamp()
+  final DateTime updatedAt;
+
+  Post({required this.id, required this.title, required this.createdAt, required this.updatedAt});
+}
+
+// The generator creates DateTime-specific query methods:
+class PostQuery extends Query<Post> {
+  // Equality
+  PostQuery whereCreatedAt(DateTime createdAt) { ... }
+  PostQuery whereCreatedAtNotEq(DateTime createdAt) { ... }
+  
+  // Comparison (semantic names for DateTime)
+  PostQuery whereCreatedAtAfter(DateTime createdAt) { ... }      // >
+  PostQuery whereCreatedAtAtOrAfter(DateTime createdAt) { ... }  // >=
+  PostQuery whereCreatedAtBefore(DateTime createdAt) { ... }     // <
+  PostQuery whereCreatedAtAtOrBefore(DateTime createdAt) { ... } // <=
+  
+  // Ordering (uses _seconds column)
+  PostQuery orderByCreatedAt({bool ascending = true}) { ... }
+}
+
+// And helper functions for conversion:
+DateTime _timestampToDateTime(int seconds, int nanos) { ... }
+Map<String, int> _dateTimeToTimestamp(DateTime dateTime) { ... }
+
+// The _fromMap reads from seconds/nanos columns:
+Post _fromMap(Map<String, dynamic> map) {
+  return Post(
+    id: map['id'],
+    title: map['title'],
+    createdAt: _timestampToDateTime(map['created_at_seconds'], map['created_at_nanos']),
+    updatedAt: _timestampToDateTime(map['updated_at_seconds'], map['updated_at_nanos']),
+  );
+}
+```
+
+**Database Schema:** For `@Timestamp` fields, create two INTEGER columns:
+```sql
+created_at_seconds INTEGER NOT NULL,
+created_at_nanos INTEGER NOT NULL
+```
+
 #### Changeset
 
 ```dart

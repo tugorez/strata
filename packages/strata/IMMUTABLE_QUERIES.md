@@ -27,13 +27,13 @@ print(activeGuests.whereClauses.length); // 2
 Build reusable query fragments that can be combined:
 
 ```dart
-// Common query fragments
-final recentItems = ItemQuery().whereDateGreaterThan(DateTime.now().subtract(Duration(days: 7)));
-final expensiveItems = ItemQuery().wherePriceGreaterThan(100.0);
+// Common query fragments - using @Timestamp annotated DateTime field
+final recentPosts = PostQuery().whereCreatedAtAfter(DateTime.now().subtract(Duration(days: 7)));
+final publishedPosts = PostQuery().wherePublished(true);
 
 // Combine them in different ways
-final recentAndExpensive = recentItems.wherePriceGreaterThan(100.0);
-final cheapRecent = recentItems.wherePriceLessThan(50.0);
+final recentPublished = recentPosts.wherePublished(true);
+final recentDrafts = recentPosts.wherePublished(false);
 
 // Original fragments are unchanged
 ```

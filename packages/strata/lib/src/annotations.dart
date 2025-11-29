@@ -106,3 +106,44 @@ class HasOne {
   /// Creates a new [HasOne] annotation.
   const HasOne(this.type, {required this.foreignKey});
 }
+
+/// An annotation to mark a `DateTime` field as a high-precision timestamp.
+///
+/// When a field is annotated with `@Timestamp()`, the code generator will
+/// map it to two database columns: `{field_name}_seconds` and `{field_name}_nanos`.
+/// This provides nanosecond precision for timestamps.
+///
+/// The seconds column stores seconds since Unix epoch (UTC).
+/// The nanos column stores the nanoseconds component (0-999,999,999).
+///
+/// ### Example
+///
+/// ```dart
+/// @StrataSchema(table: 'posts')
+/// class Post with Schema {
+///   final int id;
+///   final String title;
+///
+///   @Timestamp()
+///   final DateTime createdAt;
+///
+///   @Timestamp()
+///   final DateTime updatedAt;
+///
+///   Post({
+///     required this.id,
+///     required this.title,
+///     required this.createdAt,
+///     required this.updatedAt,
+///   });
+/// }
+/// ```
+///
+/// This will generate code that:
+/// - Reads from `created_at_seconds` and `created_at_nanos` columns
+/// - Reads from `updated_at_seconds` and `updated_at_nanos` columns
+/// - Converts them to/from `DateTime` objects in UTC
+class Timestamp {
+  /// Creates a new [Timestamp] annotation.
+  const Timestamp();
+}

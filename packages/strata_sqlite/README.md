@@ -309,6 +309,39 @@ final query = AccountQuery()
 // SELECT * FROM accounts WHERE username = ? AND age = ?
 ```
 
+### Timestamp Fields
+
+For high-precision timestamps, use `@Timestamp` on `DateTime` fields. The generator creates two database columns (`_seconds` and `_nanos`) and DateTime-specific query methods:
+
+```dart
+// Schema definition
+@StrataSchema(table: 'events')
+class Event with Schema {
+  final int id;
+  final String name;
+  
+  @Timestamp()
+  final DateTime occurredAt;
+
+  Event({required this.id, required this.name, required this.occurredAt});
+}
+
+// Migration
+// CREATE TABLE events (
+//   id INTEGER PRIMARY KEY AUTOINCREMENT,
+//   name TEXT NOT NULL,
+//   occurred_at_seconds INTEGER NOT NULL,
+//   occurred_at_nanos INTEGER NOT NULL
+// );
+
+// Query with DateTime-specific methods
+final recentEvents = await repo.getAll(
+  EventQuery()
+      .whereOccurredAtAfter(DateTime.now().subtract(Duration(hours: 24)))
+      .orderByOccurredAt(ascending: false)
+);
+```
+
 ## Production Ready
 
 ✅ **Fully Implemented**: This adapter is production-ready with a complete, tested implementation of all core features.

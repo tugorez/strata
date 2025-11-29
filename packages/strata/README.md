@@ -11,6 +11,7 @@ An Ecto-inspired data mapping and changeset validation library for Dart.
 *   **Codegen for Queries:** Define your data models using `@StrataSchema` annotations. A code generator creates type-safe `Query` and `Changeset` classes for you, eliminating "magic strings" and providing editor autocompletion.
 *   **Transactions:** Wrap multiple operations in a transaction for atomic execution with automatic rollback on failure.
 *   **Associations:** Define relationships between models using `@HasMany`, `@BelongsTo`, and `@HasOne` annotations.
+*   **Timestamp Fields:** Use `@Timestamp` annotation on `DateTime` fields for high-precision storage using separate seconds and nanoseconds columns.
 *   **Migration Support:** A database-agnostic `Migration<T>` interface that adapters implement for their specific migration needs. SQL-based adapters can use file-based migrations with code generation (Ecto-style).
 
 ## The Adapter Model
@@ -355,6 +356,68 @@ final user = await repo.get(query);
 ```
 
 > **Note:** Association preloading is currently being implemented. The annotations and generated preload methods are available, with full loading support coming soon.
+
+### Timestamp Fields
+
+Use the `@Timestamp` annotation on `DateTime` fields for high-precision timestamp storage. The field is stored as two database columns: `{field}_seconds` (seconds since Unix epoch) and `{field}_nanos` (nanoseconds component).
+
+```dart
+@StrataSchema(table: 'posts')
+class Post with Schema {
+  final int id;
+  final String title;
+  
+  @Timestamp()
+  final DateTime createdAt;
+  
+  @Timestamp()
+  final DateTime updatedAt;
+
+  Post({
+    required this.id,
+    required this.title,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+}
+```
+
+#### Database Schema
+
+For `@Timestamp` fields, create two columns in your migration:
+
+```sql
+-- @Up()
+CREATE TABLE posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  created_at_seconds INTEGER NOT NULL,
+  created_at_nanos INTEGER NOT NULL,
+  updated_at_seconds INTEGER NOT NULL,
+  updated_at_nanos INTEGER NOT NULL
+);
+```
+
+#### Generated Query Methods
+
+The code generator creates DateTime-specific comparison methods:
+
+```dart
+// Filter by timestamp
+final recentPosts = PostQuery()
+    .whereCreatedAtAfter(DateTime.now().subtract(Duration(days: 7)))
+    .whereUpdatedAtBefore(DateTime.now())
+    .orderByCreatedAt(ascending: false);
+
+// Available methods for timestamp fields:
+// - whereCreatedAt(DateTime)        - equality
+// - whereCreatedAtNotEq(DateTime)   - not equal
+// - whereCreatedAtAfter(DateTime)   - greater than
+// - whereCreatedAtAtOrAfter(DateTime) - greater than or equal
+// - whereCreatedAtBefore(DateTime)  - less than
+// - whereCreatedAtAtOrBefore(DateTime) - less than or equal
+// - orderByCreatedAt({bool ascending})
+```
 
 ### Migrations
 

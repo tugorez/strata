@@ -44,28 +44,153 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
     // 2. Read the annotation values
     final String tableName = annotation.read('table').stringValue;
 
-    // 3. Generate the three components + helper function
+    // 3. Check if any fields have @Timestamp annotation
+    final hasTimestampFields = _hasAnyTimestampFields(element);
+
+    // 4. Generate the components + helper functions
     final queryClass = _buildQueryClass(element, tableName);
     final changesetClass = _buildChangesetClass(element, tableName);
     final fromMapFunction = _buildFromMapFunction(element);
     final extensionClass = _buildSchemaExtension(element);
 
-    // 4. Combine them into one file
-    final library = Library(
-      (b) => b
-        ..body.addAll([
-          queryClass,
-          changesetClass,
-          fromMapFunction,
-          extensionClass,
-        ]),
-    );
+    // 5. Combine them into one file
+    final bodyItems = <Spec>[queryClass, changesetClass];
+
+    // Add timestamp helper function if needed
+    if (hasTimestampFields) {
+      bodyItems.add(_buildTimestampToDateTimeFunction());
+      bodyItems.add(_buildDateTimeToTimestampFunction());
+    }
+
+    bodyItems.add(fromMapFunction);
+    bodyItems.add(extensionClass);
+
+    final library = Library((b) => b..body.addAll(bodyItems));
 
     // 5. Format and return the final code string
     final emitter = DartEmitter();
     return DartFormatter(
       languageVersion: DartFormatter.latestLanguageVersion,
     ).format('${library.accept(emitter)}');
+  }
+
+  /// Checks if a field has the @Timestamp annotation.
+  bool _hasTimestampAnnotation(ClassElement classElement, String fieldName) {
+    // Find the field in the class
+    for (final field in classElement.fields) {
+      if (field.name == fieldName) {
+        // Check for @Timestamp annotation
+        for (final annotation in field.metadata.annotations) {
+          final annotationElement = annotation.element;
+          if (annotationElement is ConstructorElement) {
+            final className = annotationElement.enclosingElement.name;
+            if (className == 'Timestamp') {
+              return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  /// Checks if any field in the class has a @Timestamp annotation.
+  bool _hasAnyTimestampFields(ClassElement classElement) {
+    final constructor = classElement.unnamedConstructor;
+    if (constructor == null) return false;
+
+    for (final param in constructor.formalParameters) {
+      if (param.isRequired &&
+          _hasTimestampAnnotation(classElement, param.name!)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Generates the `_timestampToDateTime` helper function.
+  ///
+  /// Converts seconds and nanoseconds to a DateTime in UTC.
+  Method _buildTimestampToDateTimeFunction() {
+    // DateTime _timestampToDateTime(int seconds, int nanos) {
+    //   return DateTime.fromMicrosecondsSinceEpoch(
+    //     seconds * 1000000 + nanos ~/ 1000,
+    //     isUtc: true,
+    //   );
+    // }
+    return Method(
+      (b) => b
+        ..name = '_timestampToDateTime'
+        ..returns = refer('DateTime')
+        ..requiredParameters.addAll([
+          Parameter(
+            (b) => b
+              ..name = 'seconds'
+              ..type = refer('int'),
+          ),
+          Parameter(
+            (b) => b
+              ..name = 'nanos'
+              ..type = refer('int'),
+          ),
+        ])
+        ..body = refer('DateTime')
+            .property('fromMicrosecondsSinceEpoch')
+            .call(
+              [
+                refer('seconds')
+                    .operatorMultiply(literalNum(1000000))
+                    .operatorAdd(
+                      refer('nanos').operatorIntDivide(literalNum(1000)),
+                    ),
+              ],
+              {'isUtc': literalTrue},
+            )
+            .returned
+            .statement,
+    );
+  }
+
+  /// Generates the `_dateTimeToTimestamp` helper function.
+  ///
+  /// Converts a DateTime to a map with 'seconds' and 'nanos' keys.
+  /// This function is used by the generated changeset's cast method to
+  /// automatically convert DateTime fields to their database column representation.
+  Method _buildDateTimeToTimestampFunction() {
+    // Map<String, int> _dateTimeToTimestamp(DateTime dateTime) {
+    //   final utc = dateTime.toUtc();
+    //   final micros = utc.microsecondsSinceEpoch;
+    //   return {
+    //     'seconds': micros ~/ 1000000,
+    //     'nanos': (micros % 1000000) * 1000,
+    //   };
+    // }
+    return Method(
+      (b) => b
+        ..name = '_dateTimeToTimestamp'
+        ..returns = refer('Map<String, int>')
+        ..requiredParameters.add(
+          Parameter(
+            (b) => b
+              ..name = 'dateTime'
+              ..type = refer('DateTime'),
+          ),
+        )
+        ..body = Block.of([
+          declareFinal(
+            'utc',
+          ).assign(refer('dateTime').property('toUtc').call([])).statement,
+          declareFinal(
+            'micros',
+          ).assign(refer('utc').property('microsecondsSinceEpoch')).statement,
+          literalMap({
+            'seconds': refer('micros').operatorIntDivide(literalNum(1000000)),
+            'nanos': refer('micros')
+                .operatorEuclideanModulo(literalNum(1000000))
+                .operatorMultiply(literalNum(1000)),
+          }).returned.statement,
+        ]),
+    );
   }
 
   /// Generates the `_$$AccountFromMap` helper function.
@@ -101,8 +226,19 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
       }
 
       final columnName = _toSnakeCase(fieldName);
-      // Map from DB column (snake_case) to Dart field (camelCase)
-      namedArgs[fieldName] = refer('map').index(literalString(columnName));
+
+      // Check if this field has @Timestamp annotation
+      if (_hasTimestampAnnotation(element, fieldName)) {
+        // For timestamp fields, read seconds and nanos columns and convert to DateTime
+        // _timestampToDateTime(map['created_at_seconds'], map['created_at_nanos'])
+        namedArgs[fieldName] = refer('_timestampToDateTime').call([
+          refer('map').index(literalString('${columnName}_seconds')),
+          refer('map').index(literalString('${columnName}_nanos')),
+        ]);
+      } else {
+        // Map from DB column (snake_case) to Dart field (camelCase)
+        namedArgs[fieldName] = refer('map').index(literalString(columnName));
+      }
     }
 
     return Method(
@@ -199,6 +335,23 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
       // "id" -> "Id", "username" -> "Username"
       final capitalizedFieldName =
           fieldName[0].toUpperCase() + fieldName.substring(1);
+
+      // Check if this is a @Timestamp annotated DateTime field
+      final isTimestamp = _hasTimestampAnnotation(element, fieldName);
+
+      if (isTimestamp) {
+        // Generate DateTime comparison methods for timestamp fields
+        // These compare against the _seconds column
+        methods.addAll(
+          _buildTimestampWhereMethods(
+            queryClassName,
+            fieldName,
+            columnName,
+            capitalizedFieldName,
+          ),
+        );
+        continue; // Skip the standard type handling
+      }
 
       // Generate whereFieldName (equality operator) - works for all types
       methods.add(
@@ -334,9 +487,14 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
       if (!param.isRequired) continue;
 
       final fieldName = param.name!;
-      final columnName = _toSnakeCase(fieldName);
+      var columnName = _toSnakeCase(fieldName);
       final capitalizedFieldName =
           fieldName[0].toUpperCase() + fieldName.substring(1);
+
+      // For @Timestamp fields, order by the _seconds column
+      if (_hasTimestampAnnotation(element, fieldName)) {
+        columnName = '${columnName}_seconds';
+      }
 
       // Generate orderByFieldName method with optional ascending parameter
       methods.add(
@@ -421,6 +579,70 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
         );
       }
     }
+
+    return methods;
+  }
+
+  /// Helper method to build where clause methods for @Timestamp DateTime fields.
+  ///
+  /// Generates comparison methods that compare against the `{column}_seconds` column.
+  /// The DateTime value is converted to seconds since epoch for the comparison.
+  List<Method> _buildTimestampWhereMethods(
+    String queryClassName,
+    String fieldName,
+    String columnName,
+    String capitalizedFieldName,
+  ) {
+    final methods = <Method>[];
+    final secondsColumn = '${columnName}_seconds';
+
+    // Helper to build a method that converts DateTime to seconds and compares
+    Method buildTimestampWhereMethod(String operator, String methodSuffix) {
+      return Method(
+        (b) => b
+          ..name = 'where$capitalizedFieldName$methodSuffix'
+          ..returns = refer(queryClassName)
+          ..requiredParameters.add(
+            Parameter(
+              (b) => b
+                ..name = fieldName
+                ..type = refer('DateTime'),
+            ),
+          )
+          ..body = Block.of([
+            // Convert DateTime to seconds: dateTime.toUtc().millisecondsSinceEpoch ~/ 1000
+            declareFinal('seconds')
+                .assign(
+                  refer(fieldName)
+                      .property('toUtc')
+                      .call([])
+                      .property('millisecondsSinceEpoch')
+                      .operatorIntDivide(literalNum(1000)),
+                )
+                .statement,
+            refer(queryClassName)
+                .newInstanceNamed('_', [
+                  refer('copyWithWhereClause').call([
+                    refer('WhereClause').call([
+                      literalString(secondsColumn),
+                      literalString(operator),
+                      refer('seconds'),
+                    ]),
+                  ]),
+                ])
+                .returned
+                .statement,
+          ]),
+      );
+    }
+
+    // Generate all comparison operators for DateTime
+    methods.add(buildTimestampWhereMethod('=', ''));
+    methods.add(buildTimestampWhereMethod('!=', 'NotEq'));
+    methods.add(buildTimestampWhereMethod('>', 'After'));
+    methods.add(buildTimestampWhereMethod('>=', 'AtOrAfter'));
+    methods.add(buildTimestampWhereMethod('<', 'Before'));
+    methods.add(buildTimestampWhereMethod('<=', 'AtOrBefore'));
 
     return methods;
   }
@@ -568,10 +790,32 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
   }
 
   /// Generates the `AccountChangeset` class
+  ///
+  /// For schemas with @Timestamp fields, generates an overridden `cast` method
+  /// that automatically converts DateTime values to their `_seconds` and `_nanos`
+  /// column representations.
   Class _buildChangesetClass(ClassElement element, String tableName) {
     final className = element.name!;
-    return Class(
-      (b) => b
+    final hasTimestamps = _hasAnyTimestampFields(element);
+
+    // Collect timestamp field info for the cast override
+    final timestampFields = <String, String>{}; // fieldName -> columnName
+    if (hasTimestamps) {
+      final constructor = element.unnamedConstructor;
+      if (constructor != null) {
+        for (final param in constructor.formalParameters) {
+          if (param.isRequired &&
+              _hasTimestampAnnotation(element, param.name!)) {
+            final fieldName = param.name!;
+            final columnName = _toSnakeCase(fieldName);
+            timestampFields[fieldName] = columnName;
+          }
+        }
+      }
+    }
+
+    return Class((b) {
+      b
         ..name = '${className}Changeset'
         ..extend = refer('Changeset<$className>')
         ..constructors.add(
@@ -595,7 +839,76 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
                 ).code,
               ),
           ),
-        ),
+        );
+
+      // Add cast override if there are timestamp fields
+      if (timestampFields.isNotEmpty) {
+        b.methods.add(_buildChangesetCastMethod(className, timestampFields));
+      }
+    });
+  }
+
+  /// Generates an overridden `cast` method that handles DateTime→timestamp conversion.
+  Method _buildChangesetCastMethod(
+    String className,
+    Map<String, String> timestampFields,
+  ) {
+    // Build the conversion logic for each timestamp field
+    final conversionStatements = <Code>[];
+
+    for (final entry in timestampFields.entries) {
+      final fieldName = entry.key;
+      final columnName = entry.value;
+      final secondsCol = '${columnName}_seconds';
+      final nanosCol = '${columnName}_nanos';
+
+      // if (params.containsKey('createdAt') && params['createdAt'] is DateTime) {
+      //   final ts = _dateTimeToTimestamp(params['createdAt'] as DateTime);
+      //   params['created_at_seconds'] = ts['seconds'];
+      //   params['created_at_nanos'] = ts['nanos'];
+      //   params.remove('createdAt');
+      // }
+      conversionStatements.add(
+        Code('''
+if (params.containsKey('$fieldName') && params['$fieldName'] is DateTime) {
+  final ts = _dateTimeToTimestamp(params['$fieldName'] as DateTime);
+  params['$secondsCol'] = ts['seconds'];
+  params['$nanosCol'] = ts['nanos'];
+  params.remove('$fieldName');
+}
+'''),
+      );
+    }
+
+    return Method(
+      (b) => b
+        ..name = 'cast'
+        ..annotations.add(refer('override'))
+        ..returns = refer('${className}Changeset')
+        ..requiredParameters.add(
+          Parameter(
+            (b) => b
+              ..name = 'fields'
+              ..type = refer('List<String>'),
+          ),
+        )
+        ..body = Block.of([
+          // Add timestamp field column names to fields list if the DateTime field is included
+          ...timestampFields.entries.map((entry) {
+            final fieldName = entry.key;
+            final columnName = entry.value;
+            return Code('''
+if (fields.contains('$fieldName')) {
+  fields = [...fields.where((f) => f != '$fieldName'), '${columnName}_seconds', '${columnName}_nanos'];
+}
+''');
+          }),
+          // Convert DateTime values in params to seconds/nanos
+          ...conversionStatements,
+          // Call super.cast
+          refer('super').property('cast').call([refer('fields')]).statement,
+          refer('this').returned.statement,
+        ]),
     );
   }
 

@@ -21,6 +21,7 @@ This monorepo contains the following packages:
 - **Type-safe Queries** - Generated query builders with compile-time safety
 - **Transactions** - Atomic operations with automatic rollback on error
 - **Associations** - Define relationships with `@HasMany`, `@BelongsTo`, `@HasOne`
+- **Timestamp Fields** - High-precision DateTime with `@Timestamp` (seconds + nanoseconds)
 - **Migrations** - SQL file-based migrations with rollback support
 - **Adapter Pattern** - Swap databases without changing application code
 
