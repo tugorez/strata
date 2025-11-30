@@ -3,7 +3,25 @@ import 'package:source_gen/source_gen.dart';
 import 'package:code_builder/code_builder.dart';
 import 'package:dart_style/dart_style.dart';
 import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:strata/strata.dart';
+
+/// Information about an association annotation.
+class _AssociationAnnotation {
+  final String fieldName;
+  final String annotationType; // 'HasMany', 'BelongsTo', or 'HasOne'
+  final String relatedTypeName;
+  final String foreignKey;
+  final DartType? fieldType;
+
+  _AssociationAnnotation({
+    required this.fieldName,
+    required this.annotationType,
+    required this.relatedTypeName,
+    required this.foreignKey,
+    this.fieldType,
+  });
+}
 
 /// Creates the schema builder for use with `build_runner`.
 ///
@@ -318,6 +336,9 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
                   'preloadAssociations': refer(
                     'query',
                   ).property('preloadAssociations'),
+                  'associationsToPreload': refer(
+                    'query',
+                  ).property('associationsToPreload'),
                 }).code,
               ),
           ),
@@ -545,58 +566,226 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
   }
 
   /// Generates the `preload[AssociationName]` methods for the Query class.
+  ///
+  /// Only generates preload methods for fields with @HasMany, @BelongsTo, or @HasOne
+  /// annotations. These methods create an AssociationInfo with all the metadata
+  /// needed to actually load the association.
   List<Method> _buildPreloadMethods(
     ClassElement element,
     String queryClassName,
   ) {
     final methods = <Method>[];
+    final className = element.name!;
 
-    // Get required constructor fields - these are data fields
-    final constructor = element.unnamedConstructor;
-    final requiredFields = <String>{};
-    if (constructor != null) {
-      for (final param in constructor.formalParameters) {
-        if (param.isRequired) {
-          requiredFields.add(param.name!);
+    // Find all fields with association annotations
+    final associations = _getAssociationAnnotations(element);
+
+    for (final assoc in associations) {
+      final capitalizedFieldName =
+          assoc.fieldName[0].toUpperCase() + assoc.fieldName.substring(1);
+
+      // Determine the AssociationType enum value
+      final associationType = switch (assoc.annotationType) {
+        'HasMany' => 'AssociationType.hasMany',
+        'BelongsTo' => 'AssociationType.belongsTo',
+        'HasOne' => 'AssociationType.hasOne',
+        _ => 'AssociationType.hasMany',
+      };
+
+      // Get the related query class name (e.g., 'Todo' -> 'TodoQuery')
+      final relatedQueryClassName = '${assoc.relatedTypeName}Query';
+
+      // Convert snake_case foreignKey to camelCase field name
+      final foreignKeyField = _snakeToCamel(assoc.foreignKey);
+
+      methods.add(
+        Method(
+          (b) => b
+            ..name = 'preload$capitalizedFieldName'
+            ..returns = refer(queryClassName)
+            ..body = Block.of([
+              // Create the related query to get its table name and fromMap
+              declareFinal(
+                'relatedQuery',
+              ).assign(refer(relatedQueryClassName).call([])).statement,
+              // Create the AssociationInfo
+              declareFinal('association')
+                  .assign(
+                    refer('AssociationInfo').call([], {
+                      'fieldName': literalString(assoc.fieldName),
+                      'type': refer(associationType),
+                      'relatedTable': refer('relatedQuery').property('table'),
+                      'foreignKey': literalString(assoc.foreignKey),
+                      'foreignKeyField': literalString(foreignKeyField),
+                      'queryFactory': Method(
+                        (b) => b
+                          ..body = refer(relatedQueryClassName).call([]).code,
+                      ).closure,
+                      'fromMap': refer('relatedQuery').property('fromMap'),
+                      // Get FK value from an object - used for related records
+                      'getForeignKeyValue': Method(
+                        (b) => b
+                          ..requiredParameters.add(
+                            Parameter((p) => p..name = 'obj'),
+                          )
+                          ..body = refer('obj')
+                              .asA(refer('dynamic'))
+                              .property(foreignKeyField)
+                              .code,
+                      ).closure,
+                      // Get primary key (id) from an object
+                      'getPrimaryKeyValue': Method(
+                        (b) => b
+                          ..requiredParameters.add(
+                            Parameter((p) => p..name = 'obj'),
+                          )
+                          ..body = refer(
+                            'obj',
+                          ).asA(refer('dynamic')).property('id').code,
+                      ).closure,
+                      // Copy with association value - handles type casting for lists
+                      'copyWithAssociation': _buildCopyWithAssociationClosure(
+                        className,
+                        assoc,
+                      ),
+                    }),
+                  )
+                  .statement,
+              refer(queryClassName)
+                  .newInstanceNamed('_', [
+                    refer(
+                      'copyWithAssociationPreload',
+                    ).call([refer('association')]),
+                  ])
+                  .returned
+                  .statement,
+            ]),
+        ),
+      );
+    }
+
+    return methods;
+  }
+
+  /// Builds the copyWithAssociation closure that properly casts the value
+  /// to the expected type for the association field.
+  Expression _buildCopyWithAssociationClosure(
+    String className,
+    _AssociationAnnotation assoc,
+  ) {
+    // Determine if this is a List type (HasMany) or single object (BelongsTo/HasOne)
+    final isListType = assoc.annotationType == 'HasMany';
+
+    if (isListType) {
+      // For HasMany: cast List<Schema> to List<RelatedType>
+      // (obj, value) => (obj as User).copyWith(todos: (value as List).cast<Todo>())
+      return Method(
+        (b) => b
+          ..requiredParameters.addAll([
+            Parameter((p) => p..name = 'obj'),
+            Parameter((p) => p..name = 'value'),
+          ])
+          ..body = refer('obj')
+              .asA(refer(className))
+              .property('copyWith')
+              .call([], {
+                assoc.fieldName: refer('value')
+                    .asA(refer('List'))
+                    .property('cast')
+                    .call([], {}, [refer(assoc.relatedTypeName)]),
+              })
+              .asA(refer('dynamic'))
+              .code,
+      ).closure;
+    } else {
+      // For BelongsTo/HasOne: cast to RelatedType
+      // (obj, value) => (obj as Todo).copyWith(user: value as User)
+      return Method(
+        (b) => b
+          ..requiredParameters.addAll([
+            Parameter((p) => p..name = 'obj'),
+            Parameter((p) => p..name = 'value'),
+          ])
+          ..body = refer('obj')
+              .asA(refer(className))
+              .property('copyWith')
+              .call([], {
+                assoc.fieldName: refer(
+                  'value',
+                ).asA(refer(assoc.relatedTypeName)),
+              })
+              .asA(refer('dynamic'))
+              .code,
+      ).closure;
+    }
+  }
+
+  /// Extracts association annotations (@HasMany, @BelongsTo, @HasOne) from a class.
+  List<_AssociationAnnotation> _getAssociationAnnotations(
+    ClassElement element,
+  ) {
+    final associations = <_AssociationAnnotation>[];
+
+    for (final field in element.fields) {
+      for (final annotation in field.metadata.annotations) {
+        final annotationElement = annotation.element;
+        if (annotationElement is! ConstructorElement) continue;
+
+        final className = annotationElement.enclosingElement.name;
+        if (className != 'HasMany' &&
+            className != 'BelongsTo' &&
+            className != 'HasOne') {
+          continue;
+        }
+
+        // Extract the type argument (first positional argument)
+        final annotationValue = annotation.computeConstantValue();
+        if (annotationValue == null) continue;
+
+        final typeField = annotationValue.getField('type');
+        final relatedTypeName =
+            typeField?.toTypeValue()?.getDisplayString(
+              withNullability: false,
+            ) ??
+            '';
+
+        // Extract the foreignKey argument
+        final foreignKeyField = annotationValue.getField('foreignKey');
+        final foreignKey = foreignKeyField?.toStringValue() ?? '';
+
+        if (relatedTypeName.isNotEmpty &&
+            foreignKey.isNotEmpty &&
+            className != null) {
+          associations.add(
+            _AssociationAnnotation(
+              fieldName: field.name!,
+              annotationType: className,
+              relatedTypeName: relatedTypeName,
+              foreignKey: foreignKey,
+              fieldType: field.type,
+            ),
+          );
         }
       }
     }
 
-    // Look through all fields in the class for association fields
-    for (final field in element.fields) {
-      // Skip if it's a required field (data field, not association)
-      if (requiredFields.contains(field.name)) continue;
+    return associations;
+  }
 
-      // Association fields are optional fields that are nullable or Lists
-      final fieldType = field.type.getDisplayString();
-      final isListType = fieldType.startsWith('List<');
-      final isNullable = fieldType.endsWith('?');
+  /// Converts snake_case to camelCase.
+  String _snakeToCamel(String snake) {
+    final parts = snake.split('_');
+    if (parts.isEmpty) return snake;
 
-      // Only generate preload methods for optional nullable or list fields
-      if (isListType || isNullable) {
-        final fieldName = field.name;
-        if (fieldName == null || fieldName.isEmpty) continue;
-
-        final capitalizedFieldName =
-            fieldName[0].toUpperCase() + fieldName.substring(1);
-
-        methods.add(
-          Method(
-            (b) => b
-              ..name = 'preload$capitalizedFieldName'
-              ..returns = refer(queryClassName)
-              ..body = refer(queryClassName)
-                  .newInstanceNamed('_', [
-                    refer('copyWithPreload').call([literalString(fieldName)]),
-                  ])
-                  .returned
-                  .statement,
-          ),
-        );
+    final result = StringBuffer(parts.first);
+    for (var i = 1; i < parts.length; i++) {
+      final part = parts[i];
+      if (part.isNotEmpty) {
+        result.write(part[0].toUpperCase());
+        result.write(part.substring(1));
       }
     }
-
-    return methods;
+    return result.toString();
   }
 
   /// Helper method to build where clause methods for @Timestamp DateTime fields.

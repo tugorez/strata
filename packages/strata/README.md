@@ -346,16 +346,28 @@ class User with Schema {
 
 #### Preloading Associations
 
-The code generator creates preload methods for associations:
+The code generator creates preload methods for associations. Each association annotation generates a corresponding `preload*()` method:
 
 ```dart
-// Query with preloaded todos
-final query = UserQuery().preloadTodos();
-final user = await repo.get(query);
-// user.todos is now populated (when implemented)
+// Preload a HasMany association
+final userQuery = UserQuery().preloadTodos();
+final user = await repo.get(userQuery);
+print(user.todos); // List of todos is populated
+
+// Preload a BelongsTo association
+final todoQuery = TodoQuery().preloadUser();
+final todos = await repo.all(todoQuery);
+for (final todo in todos) {
+  print('${todo.title} by ${todo.user?.name}');
+}
+
+// Chain multiple preloads
+final query = UserQuery()
+    .preloadTodos()
+    .preloadProfile();
 ```
 
-> **Note:** Association preloading is currently being implemented. The annotations and generated preload methods are available, with full loading support coming soon.
+Preloading works with both `get()` and `all()` repository methods. The preloaded data is populated in the returned model instances.
 
 ### Timestamp Fields
 

@@ -3,6 +3,7 @@ import 'package:strata/src/query.dart';
 import 'package:strata/src/changeset.dart';
 import 'package:strata/src/schema.dart';
 import 'package:strata/src/exceptions.dart';
+import 'package:strata/src/query_parts.dart';
 
 /// The main public API for interacting with the database.
 ///
@@ -45,11 +46,13 @@ class StrataRepo {
     final map = await _adapter.getOne(query);
     if (map == null) return null;
 
-    final result = query.fromMap(map);
+    var result = query.fromMap(map);
 
     // Preload associations if any
-    if (query.preloadAssociations.isNotEmpty) {
-      await _preloadAssociations([result], query);
+    if (query.associationsToPreload.isNotEmpty) {
+      final results = [result];
+      await _preloadAssociations(results, query);
+      result = results.first;
     }
 
     return result;
@@ -66,7 +69,7 @@ class StrataRepo {
     final results = maps.map((map) => query.fromMap(map)).toList();
 
     // Preload associations if any
-    if (query.preloadAssociations.isNotEmpty) {
+    if (query.associationsToPreload.isNotEmpty) {
       await _preloadAssociations(results, query);
     }
 
@@ -75,17 +78,181 @@ class StrataRepo {
 
   /// Preloads associations for a list of schema objects.
   ///
-  /// This is an internal method that loads related data for associations
-  /// specified in the query's preloadAssociations list.
+  /// This method iterates through each association marked for preloading
+  /// and loads the related data. For `HasMany` and `HasOne` associations,
+  /// it queries the related table using the foreign key. For `BelongsTo`
+  /// associations, it queries the parent table by ID.
+  ///
+  /// The loaded associations are then populated onto the result objects
+  /// using the generated `copyWith` extension methods.
   Future<void> _preloadAssociations<T extends Schema>(
     List<T> results,
     Query<T> query,
   ) async {
-    // TODO: Implement association loading logic
-    // For now, this is a placeholder that will be enhanced
-    // to actually load and populate associations
-    // The actual loading will need to be handled by generated code
-    // that knows about the associations for each schema
+    if (results.isEmpty) return;
+
+    for (final association in query.associationsToPreload) {
+      switch (association.type) {
+        case AssociationType.hasMany:
+          await _preloadHasMany(results, association);
+        case AssociationType.hasOne:
+          await _preloadHasOne(results, association);
+        case AssociationType.belongsTo:
+          await _preloadBelongsTo(results, association);
+      }
+    }
+  }
+
+  /// Preloads a has-many association.
+  ///
+  /// For each parent object, loads all related child objects where
+  /// the foreign key matches the parent's ID.
+  Future<void> _preloadHasMany<T extends Schema>(
+    List<T> results,
+    AssociationInfo association,
+  ) async {
+    // Get all parent IDs using the association's getPrimaryKeyValue function
+    final parentIds = results
+        .map((r) => association.getPrimaryKeyValue(r))
+        .toList();
+    if (parentIds.isEmpty) return;
+
+    // Build a query for the related table
+    final relatedQuery = association.queryFactory();
+    final queryWithWhere = Query.copy(
+      table: relatedQuery.table,
+      fromMap: relatedQuery.fromMap,
+      whereClauses: [WhereClause(association.foreignKey, 'IN', parentIds)],
+      orderByClauses: relatedQuery.orderByClauses,
+      limitCount: null,
+      preloadAssociations: [],
+    );
+
+    // Load all related records
+    final relatedMaps = await _adapter.getAll(queryWithWhere);
+    final relatedRecords = relatedMaps
+        .map((m) => association.fromMap(m))
+        .toList();
+
+    // Group related records by foreign key value
+    final recordsByParentId = <dynamic, List<Schema>>{};
+    for (final record in relatedRecords) {
+      // Get the foreign key value from the related record
+      final fkValue = association.getForeignKeyValue(record);
+      recordsByParentId.putIfAbsent(fkValue, () => []).add(record);
+    }
+
+    // Populate each parent with its related records
+    for (var i = 0; i < results.length; i++) {
+      final parent = results[i];
+      final parentId = association.getPrimaryKeyValue(parent);
+      final relatedList = recordsByParentId[parentId] ?? [];
+
+      // Use copyWithAssociation to set the association field
+      results[i] = association.copyWithAssociation(parent, relatedList) as T;
+    }
+  }
+
+  /// Preloads a has-one association.
+  ///
+  /// For each parent object, loads the single related child object where
+  /// the foreign key matches the parent's ID.
+  Future<void> _preloadHasOne<T extends Schema>(
+    List<T> results,
+    AssociationInfo association,
+  ) async {
+    // Get all parent IDs
+    final parentIds = results
+        .map((r) => association.getPrimaryKeyValue(r))
+        .toList();
+    if (parentIds.isEmpty) return;
+
+    // Build a query for the related table
+    final relatedQuery = association.queryFactory();
+    final queryWithWhere = Query.copy(
+      table: relatedQuery.table,
+      fromMap: relatedQuery.fromMap,
+      whereClauses: [WhereClause(association.foreignKey, 'IN', parentIds)],
+      orderByClauses: relatedQuery.orderByClauses,
+      limitCount: null,
+      preloadAssociations: [],
+    );
+
+    // Load all related records
+    final relatedMaps = await _adapter.getAll(queryWithWhere);
+    final relatedRecords = relatedMaps
+        .map((m) => association.fromMap(m))
+        .toList();
+
+    // Map related records by foreign key value
+    final recordByParentId = <dynamic, Schema>{};
+    for (final record in relatedRecords) {
+      final fkValue = association.getForeignKeyValue(record);
+      recordByParentId[fkValue] = record;
+    }
+
+    // Populate each parent with its related record
+    for (var i = 0; i < results.length; i++) {
+      final parent = results[i];
+      final parentId = association.getPrimaryKeyValue(parent);
+      final related = recordByParentId[parentId];
+
+      if (related != null) {
+        results[i] = association.copyWithAssociation(parent, related) as T;
+      }
+    }
+  }
+
+  /// Preloads a belongs-to association.
+  ///
+  /// For each child object, loads the parent object where
+  /// the parent's ID matches the child's foreign key value.
+  Future<void> _preloadBelongsTo<T extends Schema>(
+    List<T> results,
+    AssociationInfo association,
+  ) async {
+    // Get all foreign key values from the children
+    // For BelongsTo, the FK is on the current schema (child)
+    final parentIds = results
+        .map((r) => association.getForeignKeyValue(r))
+        .toSet()
+        .toList();
+    if (parentIds.isEmpty) return;
+
+    // Build a query for the parent table
+    final relatedQuery = association.queryFactory();
+    final queryWithWhere = Query.copy(
+      table: relatedQuery.table,
+      fromMap: relatedQuery.fromMap,
+      whereClauses: [WhereClause('id', 'IN', parentIds)],
+      orderByClauses: relatedQuery.orderByClauses,
+      limitCount: null,
+      preloadAssociations: [],
+    );
+
+    // Load all parent records
+    final relatedMaps = await _adapter.getAll(queryWithWhere);
+    final relatedRecords = relatedMaps
+        .map((m) => association.fromMap(m))
+        .toList();
+
+    // Map parent records by ID
+    final recordById = <dynamic, Schema>{};
+    for (final record in relatedRecords) {
+      final id = association.getPrimaryKeyValue(record);
+      recordById[id] = record;
+    }
+
+    // Populate each child with its parent
+    for (var i = 0; i < results.length; i++) {
+      final child = results[i];
+      final fkValue = association.getForeignKeyValue(child);
+      final parent = recordById[fkValue];
+
+      if (parent != null) {
+        results[i] = association.copyWithAssociation(child, parent) as T;
+      }
+    }
   }
 
   /// Inserts a new record using the data from a [changeset].

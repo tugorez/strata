@@ -132,15 +132,32 @@ void main() async {
 
     // 15. Demonstrate association preloading (like Ecto)
     print('\n🔗 Demonstrating association preloading...');
-    print('  ✓ Preload methods have been generated:');
-    print('     - UserQuery().preloadTodos() - ready for user->todos loading');
-    print('     - TodoQuery().preloadUser() - ready for todo->user loading');
-    print('');
-    print(
-      '  ℹ️  Note: Full association loading implementation is in progress.',
+
+    // HasMany: Load user with their todos
+    print('  Loading user with preloaded todos (HasMany)...');
+    final userWithTodos = await repo.get(
+      UserQuery().whereId(alice.id).preloadTodos(),
     );
-    print('     The framework now tracks which associations to preload via');
-    print('     query.preloadAssociations, ready for automatic population.');
+    if (userWithTodos != null && userWithTodos.todos != null) {
+      print('  ✓ User: ${userWithTodos.name}');
+      print('  ✓ Todos loaded: ${userWithTodos.todos!.length} todos');
+      for (final todo in userWithTodos.todos!) {
+        print('     - ${todo.title}');
+      }
+    } else {
+      print('  ✗ Failed to load user with todos');
+    }
+
+    // BelongsTo: Load todos with their user
+    print('\n  Loading todos with preloaded user (BelongsTo)...');
+    final todosWithUser = await repo.getAll(
+      TodoQuery().whereUserId(alice.id).preloadUser(),
+    );
+    print('  ✓ Loaded ${todosWithUser.length} todos with user info:');
+    for (final todo in todosWithUser) {
+      final ownerName = todo.user?.name ?? 'unknown';
+      print('     - "${todo.title}" by $ownerName');
+    }
 
     print('\n${'=' * 60}');
     print('✨ Example completed successfully!');
