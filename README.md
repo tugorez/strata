@@ -12,7 +12,7 @@ This monorepo contains the following packages:
 |---------|-------------|---------|
 | [strata](packages/strata/) | Core library with abstractions, changesets, and repo API | 0.1.0 |
 | [strata_builder](packages/strata_builder/) | Code generator for schemas and migrations | 0.1.0 |
-| [strata_sqlite](packages/strata_sqlite/) | SQLite adapter implementation | 0.1.0 |
+| [strata_sqlite](packages/strata_sqlite/) | SQLite adapter (native + web) | 0.1.0 |
 | [strata_in_memory](packages/strata_in_memory/) | In-memory adapter for testing | 0.1.0 |
 
 ## Features
@@ -24,6 +24,7 @@ This monorepo contains the following packages:
 - **Timestamp Fields** - High-precision DateTime with `@Timestamp` (seconds + nanoseconds)
 - **Migrations** - SQL file-based migrations with rollback support
 - **Adapter Pattern** - Swap databases without changing application code
+- **Cross-Platform** - Native (iOS, Android, macOS, Windows, Linux) and Web support
 
 ## Quick Start
 
@@ -33,7 +34,6 @@ This monorepo contains the following packages:
 dependencies:
   strata: ^0.1.0
   strata_sqlite: ^0.1.0
-  sqlite3: ^2.9.0
 
 dev_dependencies:
   build_runner: ^2.4.13

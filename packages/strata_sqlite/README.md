@@ -11,16 +11,27 @@ This package provides the concrete implementation of the `StrataAdapter` contrac
 * Built-in migration runner for versioning your database schema
 * Type-safe query translation from Strata Query objects to SQL
 * Support for `WHERE`, `ORDER BY`, and `LIMIT` clauses
+* **Cross-platform support**: Native (iOS, Android, macOS, Windows, Linux) and Web
+
+## Platform Support
+
+| Platform | Support |
+|----------|---------|
+| iOS | ✅ |
+| Android | ✅ |
+| macOS | ✅ |
+| Windows | ✅ |
+| Linux | ✅ |
+| Web | ✅ (WebAssembly) |
 
 ## Installation
 
-Add `strata`, `strata_sqlite`, and `sqlite3` to your `pubspec.yaml`:
+Add `strata` and `strata_sqlite` to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
   strata: ^0.1.0
   strata_sqlite: ^0.1.0
-  sqlite3: ^2.9.0
 
 dev_dependencies:
   build_runner: ^2.4.13
@@ -132,6 +143,60 @@ void main() async {
   print('All accounts: ${allAccounts.length}');
   
   await repo.close();
+}
+```
+
+## Web Setup
+
+To use `strata_sqlite` on the web, you need to:
+
+### 1. Download sqlite3.wasm
+
+Download `sqlite3.wasm` from the [sqlite3 package releases](https://github.com/simolus3/sqlite3.dart/releases) and place it in your `web/` directory.
+
+### 2. Initialize WebAssembly SQLite
+
+Before creating a `SqliteAdapter` on web, you must initialize the WebAssembly environment:
+
+```dart
+import 'package:strata/strata.dart';
+import 'package:strata_sqlite/strata_sqlite.dart';
+
+void main() async {
+  // Initialize WebAssembly SQLite (do this once at app startup)
+  await initializeWebSqlite(
+    wasmUri: Uri.parse('sqlite3.wasm'),  // Path to your wasm file
+    dbName: 'my_app',  // Name for IndexedDB persistence
+  );
+
+  // Then use SqliteAdapter as normal
+  final adapter = SqliteAdapter(path: '/my_database.db');
+  final repo = StrataRepo(adapter: adapter);
+  await repo.initialize();
+  
+  // ... rest of your code
+}
+```
+
+### Cross-Platform Code
+
+For apps that run on both native and web, `initializeWebSqlite()` is a no-op on native platforms, so you can safely call it unconditionally:
+
+```dart
+import 'package:strata/strata.dart';
+import 'package:strata_sqlite/strata_sqlite.dart';
+
+Future<StrataRepo> createRepo() async {
+  // Safe to call on all platforms - no-op on native
+  await initializeWebSqlite(
+    wasmUri: Uri.parse('sqlite3.wasm'),
+    dbName: 'my_app',
+  );
+
+  final adapter = SqliteAdapter(path: 'my_app.db');
+  final repo = StrataRepo(adapter: adapter);
+  await repo.initialize();
+  return repo;
 }
 ```
 
