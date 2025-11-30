@@ -1,5 +1,6 @@
-import 'package:sqlite3/sqlite3.dart';
+import 'package:sqlite3/common.dart';
 import 'package:strata/strata.dart';
+import 'platform/sqlite_database.dart';
 import 'sql_migration.dart';
 
 /// A SQLite implementation of the [StrataAdapter] contract.
@@ -8,16 +9,35 @@ import 'sql_migration.dart';
 /// operations, connection management, and migration support when using SQLite
 /// as the backend for Strata.
 ///
+/// This adapter works on both native platforms (iOS, Android, macOS, Windows,
+/// Linux) and web browsers through conditional imports.
+///
 /// ## Usage
 ///
+/// ### Native platforms
 /// ```dart
 /// final adapter = SqliteAdapter(path: 'app.db');
 /// final repo = StrataRepo(adapter: adapter);
 /// await repo.initialize();
 /// ```
+///
+/// ### Web platforms
+/// Before creating a SqliteAdapter on the web, you must initialize the
+/// WebAssembly SQLite environment:
+///
+/// ```dart
+/// // In your web app initialization
+/// await initializeWebSqlite(
+///   wasmUri: Uri.parse('sqlite3.wasm'),
+///   dbName: 'my_app',
+/// );
+///
+/// // Then use SqliteAdapter normally
+/// final adapter = SqliteAdapter(path: '/my_database.db');
+/// ```
 class SqliteAdapter implements StrataAdapter {
   final String path;
-  Database? _db;
+  CommonDatabase? _db;
 
   /// Creates a new SQLite adapter.
   ///
@@ -27,7 +47,7 @@ class SqliteAdapter implements StrataAdapter {
   /// Returns the underlying SQLite database connection.
   ///
   /// Throws if [initialize] has not been called.
-  Database get database {
+  CommonDatabase get database {
     if (_db == null) {
       throw StateError(
         'SqliteAdapter not initialized. Call initialize() first.',
@@ -66,12 +86,16 @@ class SqliteAdapter implements StrataAdapter {
   @override
   Future<void> initialize() async {
     if (_db != null) return;
-    _db = sqlite3.open(path);
+    if (path == ':memory:') {
+      _db = openSqliteInMemory();
+    } else {
+      _db = openSqliteDatabase(path);
+    }
   }
 
   @override
   Future<void> close() async {
-    _db?.dispose();
+    _db?.close();
     _db = null;
   }
 
