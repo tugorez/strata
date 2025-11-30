@@ -342,6 +342,36 @@ final recentEvents = await repo.getAll(
 );
 ```
 
+#### Optional Timestamp Fields
+
+The generator supports optional `DateTime?` fields with `@Timestamp`, useful for nullable date fields:
+
+```dart
+@StrataSchema(table: 'subscriptions')
+class Subscription with Schema {
+  final int id;
+  
+  @Timestamp()
+  final DateTime startDate;    // Required
+  
+  @Timestamp()
+  final DateTime? endDate;     // Optional - null for ongoing subscriptions
+
+  Subscription({required this.id, required this.startDate, this.endDate});
+}
+
+// Migration - allow NULL for optional timestamp columns
+// CREATE TABLE subscriptions (
+//   id INTEGER PRIMARY KEY AUTOINCREMENT,
+//   start_date_seconds INTEGER NOT NULL,
+//   start_date_nanos INTEGER NOT NULL,
+//   end_date_seconds INTEGER,      -- NULL allowed
+//   end_date_nanos INTEGER         -- NULL allowed
+// );
+```
+
+The generated code correctly handles null values when reading from the database and when inserting via changesets.
+
 ## Production Ready
 
 ✅ **Fully Implemented**: This adapter is production-ready with a complete, tested implementation of all core features.

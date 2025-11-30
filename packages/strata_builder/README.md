@@ -209,6 +209,49 @@ created_at_seconds INTEGER NOT NULL,
 created_at_nanos INTEGER NOT NULL
 ```
 
+#### Optional Timestamp Fields
+
+The generator also supports optional `DateTime?` fields with `@Timestamp`. This is useful for fields like `endDate` that may be null:
+
+```dart
+@StrataSchema(table: 'events')
+class Event with Schema {
+  final int id;
+  final String name;
+  
+  @Timestamp()
+  final DateTime startDate;    // Required
+  
+  @Timestamp()
+  final DateTime? endDate;     // Optional - can be null
+
+  Event({required this.id, required this.name, required this.startDate, this.endDate});
+}
+```
+
+The generated `_fromMap` correctly handles null values:
+```dart
+Event _fromMap(Map<String, dynamic> map) {
+  return Event(
+    id: map['id'],
+    name: map['name'],
+    startDate: _timestampToDateTime(map['start_date_seconds'], map['start_date_nanos']),
+    // Optional timestamp: checks for null before conversion
+    endDate: map['end_date_seconds'] != null
+        ? _timestampToDateTime(map['end_date_seconds'], map['end_date_nanos'])
+        : null,
+  );
+}
+```
+
+The changeset `cast` method also handles optional timestamps, converting `DateTime?` values to their column representations when present.
+
+**Database Schema:** For optional `@Timestamp` fields, allow NULL:
+```sql
+end_date_seconds INTEGER,  -- NULL allowed
+end_date_nanos INTEGER     -- NULL allowed
+```
+
 #### Changeset
 
 ```dart

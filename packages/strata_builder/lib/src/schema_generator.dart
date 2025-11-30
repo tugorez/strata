@@ -100,8 +100,8 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
     if (constructor == null) return false;
 
     for (final param in constructor.formalParameters) {
-      if (param.isRequired &&
-          _hasTimestampAnnotation(classElement, param.name!)) {
+      // Check both required and optional fields for timestamp annotation
+      if (_hasTimestampAnnotation(classElement, param.name!)) {
         return true;
       }
     }
@@ -218,27 +218,43 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
       }
       final fieldName = param.name!;
 
-      // Association fields (optional fields) should be set to null in fromMap
+      final columnName = _toSnakeCase(fieldName);
+
+      // Check if this field has @Timestamp annotation
+      if (_hasTimestampAnnotation(element, fieldName)) {
+        if (param.isRequired) {
+          // For required timestamp fields, read seconds and nanos columns and convert to DateTime
+          // _timestampToDateTime(map['created_at_seconds'], map['created_at_nanos'])
+          namedArgs[fieldName] = refer('_timestampToDateTime').call([
+            refer('map').index(literalString('${columnName}_seconds')),
+            refer('map').index(literalString('${columnName}_nanos')),
+          ]);
+        } else {
+          // For optional timestamp fields, check if seconds column is not null
+          // map['end_date_seconds'] != null ? _timestampToDateTime(map['end_date_seconds'], map['end_date_nanos']) : null
+          namedArgs[fieldName] = refer('map')
+              .index(literalString('${columnName}_seconds'))
+              .notEqualTo(literalNull)
+              .conditional(
+                refer('_timestampToDateTime').call([
+                  refer('map').index(literalString('${columnName}_seconds')),
+                  refer('map').index(literalString('${columnName}_nanos')),
+                ]),
+                literalNull,
+              );
+        }
+        continue;
+      }
+
+      // Association fields (optional non-timestamp fields) should be set to null in fromMap
       // They will be populated separately when preloaded
       if (!param.isRequired) {
         namedArgs[fieldName] = literalNull;
         continue;
       }
 
-      final columnName = _toSnakeCase(fieldName);
-
-      // Check if this field has @Timestamp annotation
-      if (_hasTimestampAnnotation(element, fieldName)) {
-        // For timestamp fields, read seconds and nanos columns and convert to DateTime
-        // _timestampToDateTime(map['created_at_seconds'], map['created_at_nanos'])
-        namedArgs[fieldName] = refer('_timestampToDateTime').call([
-          refer('map').index(literalString('${columnName}_seconds')),
-          refer('map').index(literalString('${columnName}_nanos')),
-        ]);
-      } else {
-        // Map from DB column (snake_case) to Dart field (camelCase)
-        namedArgs[fieldName] = refer('map').index(literalString(columnName));
-      }
+      // Map from DB column (snake_case) to Dart field (camelCase)
+      namedArgs[fieldName] = refer('map').index(literalString(columnName));
     }
 
     return Method(
@@ -804,8 +820,8 @@ class SchemaGenerator extends GeneratorForAnnotation<StrataSchema> {
       final constructor = element.unnamedConstructor;
       if (constructor != null) {
         for (final param in constructor.formalParameters) {
-          if (param.isRequired &&
-              _hasTimestampAnnotation(element, param.name!)) {
+          // Handle both required and optional timestamp fields
+          if (_hasTimestampAnnotation(element, param.name!)) {
             final fieldName = param.name!;
             final columnName = _toSnakeCase(fieldName);
             timestampFields[fieldName] = columnName;
